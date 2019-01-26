@@ -1,15 +1,15 @@
-import java.io.IOException;
-import java.net.DatagramSocket;
+import java.io.*;
 import java.net.InetSocketAddress;
-import java.net.ServerSocket;
+import java.net.Socket;
+import java.net.SocketException;
 import java.util.Scanner;
 
 public class UserAgent {
-    Scanner input;
+    static Scanner input = new Scanner(System.in);;
     InetSocketAddress relay_address;
+    Socket relay_connection_socket;
 
-    DatagramSocket listen_socket;
-    ServerSocket send_socket;
+    AgentAnswerThread answer_thread;
 
     private void readRelayAddress() {
         String[] raw_relay_address;
@@ -31,32 +31,112 @@ public class UserAgent {
         return new InetSocketAddress(raw_receiver_address[0], Integer.parseInt(raw_receiver_address[1]));
     }
 
-    private void sendMessage() {
-        InetSocketAddress receiver_address = getReceiversAddress();
-        System.out.println("Enter your message:");
-        String message = input.nextLine();
+    private void connect() {
+        if(relay_connection_socket != null && !relay_connection_socket.isClosed()) {
+            System.out.println("Close your previous connection first");
+        }
 
-        System.out.println("Message sent");
+        InetSocketAddress receiver_address = getReceiversAddress();
+        String message = "C " + receiver_address.toString().replace("/", ""); //connect
+
+        try {
+            relay_connection_socket = new Socket(relay_address.getAddress(), relay_address.getPort());
+            PrintWriter write = new PrintWriter(relay_connection_socket.getOutputStream());
+
+            write.println(message);
+            System.out.println("Sent: " + message);
+            write.close();
+        } catch (IOException e) {
+            System.out.println("Relay refused the connection");
+        }
     }
 
-    public UserAgent(int tcp_port, int udp_port) throws IOException {
-        input = new Scanner(System.in);
+    private void sendMessage() {
+        System.out.println("Enter your message:");
+        String message = "M "; //message
+        message += input.nextLine();
+
+        try {
+            Socket socket = new Socket(relay_address.getAddress(), relay_address.getPort());
+            PrintWriter write = new PrintWriter(socket.getOutputStream());
+            BufferedReader read = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+
+            write.println(message);
+            System.out.println("Sent: " + message);
+            write.close();
+
+            String answer = "";
+            String tmp;
+            while ((tmp = read.readLine()) != null) {
+                answer += tmp;
+            }
+
+            System.out.println("Received: " + answer);
+        } catch (IOException e) {
+            System.out.println("Relay refused the connection");
+        }
+    }
+
+    public void disconnect() {
+        String message = "D"; //disconnect
+
+        try {
+            Socket socket = new Socket(relay_address.getAddress(), relay_address.getPort());
+            PrintWriter write = new PrintWriter(socket.getOutputStream());
+
+            write.println(message);
+            System.out.println("Sent: " + message);
+            write.close();
+
+            socket.close();
+        } catch (IOException e) {
+            System.out.println("Relay refused the connection");
+        }
+    }
+
+    public boolean displayActionMenu() {
+        System.out.println("What action would you like to preform? ");
+        System.out.println("[1] - connect");
+        System.out.println("[2] - send message");
+        System.out.println("[3] - disconnect");
+        System.out.println("[0] - exit");
+
+        switch(input.nextInt()) {
+            case 1:
+                connect();
+                return true;
+            case 2:
+                sendMessage();
+                return true;
+            case 3:
+                disconnect();
+                return true;
+            case 0:
+                answer_thread.stop();
+                return false;
+            default:
+                System.out.println("Unrecognized action");
+                return true;
+        }
+    }
+
+    public UserAgent(int udp_port) {
+        System.out.println("Answering on port: " + udp_port);
+
+        try {
+            answer_thread = new AgentAnswerThread(udp_port);
+            answer_thread.start();
+        } catch (SocketException e) {
+            e.printStackTrace();
+        }
 
         readRelayAddress();
 
-        send_socket = new ServerSocket(tcp_port);
-        listen_socket = new DatagramSocket(udp_port);
-
-        while(true) {
-            sendMessage();
-        }
+        while(displayActionMenu());
     }
 
     public static void main(String[] args) {
-        try {
-            new UserAgent(5080, 5081);
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+        System.out.println("Enter the port to listen on");
+        new UserAgent(input.nextInt());
     }
 }
