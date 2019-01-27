@@ -1,25 +1,14 @@
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.Scanner;
 
 public class Relay {
-    private enum ERequestType { UNHANDLED, CONNECT, MESSAGE, DISCONNECT }
-
     static Scanner input = new Scanner(System.in);
-
     ServerSocket listen_socket;
-
-
-    private ERequestType getRequestType(String request) {
-        String command = request.split(" ")[0];
-        if      (command.equals("C"))   return ERequestType.CONNECT;
-        else if (command.equals("M"))   return ERequestType.MESSAGE;
-        else if (command.equals("D"))   return ERequestType.DISCONNECT;
-        else                            return ERequestType.UNHANDLED;
-    }
 
     private void listenForRequests() throws IOException {
         while(true) {
@@ -27,21 +16,14 @@ public class Relay {
             BufferedReader read = new BufferedReader(new InputStreamReader(agent_socket.getInputStream()));
 
             String request = read.readLine();
-            System.out.println(request);
+            System.out.println("Received: " + request);
 
-            switch(getRequestType(request)) {
-                case CONNECT:
-                    new ConnectThread(this).start();
-                    break;
-                case MESSAGE:
-                    new MessageThread(this, agent_socket).start();
-                    break;
-                case DISCONNECT:
-                    new DisconnectThread(this).start();
-                    break;
-                case UNHANDLED:
-                default:
-                    System.out.println("Unhandled request type");
+            if(ERequestType.getRequestType(request) == ERequestType.CONNECT) {
+                String[] raw_receiver_address = request.replace("C ", "").split(":");
+                InetSocketAddress receiver_address = new InetSocketAddress(raw_receiver_address[0], Integer.parseInt(raw_receiver_address[1]));
+                new ConnectThread(agent_socket, receiver_address).start();
+            } else {
+                System.out.println("Bad request");
             }
         }
     }
@@ -49,6 +31,7 @@ public class Relay {
     public Relay(int port) {
         try {
             listen_socket = new ServerSocket(port);
+            System.out.println("Listening on port " + port);
             listenForRequests();
         } catch (IOException e) {
             e.printStackTrace();
